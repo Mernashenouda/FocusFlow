@@ -142,32 +142,31 @@ const last7Dates = () => {
   return arr;
 };
 const uid = () => Math.random().toString(36).slice(2, 10);
-// Consecutive days ending today (or yesterday, so a streak doesn't die the
-// moment the clock ticks past midnight before you've logged today).
-const computeCurrentStreak = (completedDates = []) => {
-  const set = new Set(completedDates);
-  let cursor = new Date();
-  if (!set.has(dateKey(cursor))) cursor.setDate(cursor.getDate() - 1);
-  let streak = 0;
-  while (set.has(dateKey(cursor))) {
-    streak++;
-    cursor.setDate(cursor.getDate() - 1);
-  }
-  return streak;
-};
-const STREAK_MESSAGES = [
-  { min: 0, text: "Let's start today 🌱" },
-  { min: 1, text: "Nice, you're rolling!" },
-  { min: 3, text: "Building momentum 🔥" },
-  { min: 7, text: "One week strong! 💪" },
-  { min: 14, text: "Two weeks — real habit territory" },
-  { min: 30, text: "Unstoppable! 🏆" },
-];
-const streakMessage = (streak) => {
-  let msg = STREAK_MESSAGES[0].text;
-  for (const s of STREAK_MESSAGES) if (streak >= s.min) msg = s.text;
-  return msg;
-};
+
+// Shrinks an uploaded photo to a small square-ish thumbnail before storing it,
+// so cover images stay lightweight in the synced data (a few KB, not MBs).
+function fileToCompressedDataUrl(file, maxSize = 320, quality = 0.75) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = () => {
+        const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
 const addDays = (date, delta) => {
   const d = new Date(date);
   d.setDate(d.getDate() + delta);
@@ -259,18 +258,18 @@ const QUOTES = [
 ];
 
 const ACCENTS = [
-  { name: "Sage", value: "#7C9885" },
-  { name: "Periwinkle", value: "#8E97FD" },
-  { name: "Apricot", value: "#E58A5E" },
-  { name: "Rose", value: "#D98E96" },
-  { name: "Teal", value: "#5FA3A8" },
+  { name: "Violet", value: "#8B5CF6" },
+  { name: "Cyan", value: "#22D3EE" },
+  { name: "Magenta", value: "#EC4899" },
+  { name: "Amber", value: "#F59E0B" },
+  { name: "Emerald", value: "#34D399" },
 ];
 
 const CATEGORIES = ["Work", "Personal", "Learning", "Health", "Errands"];
 const PRIORITIES = [
   { id: "high", label: "High", color: "#D9736A" },
   { id: "medium", label: "Medium", color: "#E0A85E" },
-  { id: "low", label: "Low", color: "#7C9885" },
+  { id: "low", label: "Low", color: "#34D399" },
 ];
 
 const ACHIEVEMENTS = [
@@ -286,7 +285,7 @@ const ACHIEVEMENTS = [
 
 const initialData = {
   userName: "Merna",
-  theme: "light",
+  theme: "dark",
   accent: ACCENTS[0].value,
   notifications: true,
   hiddenSections: [], // NAV ids the user has chosen to hide from navigation
@@ -304,10 +303,15 @@ const initialData = {
 };
 
 /* ------------------------------ UI Primitives ------------------------------ */
-const Card = ({ className = "", children, ...rest }) => (
+const Card = ({ className = "", children, style, ...rest }) => (
   <div
-    className={`rounded-3xl border backdrop-blur-xl shadow-[0_2px_20px_-4px_rgba(20,23,31,0.06)] ${className}`}
-    style={{ background: "var(--card)", borderColor: "var(--border)" }}
+    className={`rounded-3xl border backdrop-blur-2xl ${className}`}
+    style={{
+      background: "var(--card)",
+      borderColor: "var(--border)",
+      boxShadow: "var(--glass-shadow)",
+      ...style,
+    }}
     {...rest}
   >
     {children}
@@ -480,7 +484,7 @@ function Confetti({ fire }) {
         id: i,
         x: Math.random() * 100,
         delay: Math.random() * 0.3,
-        color: [ "#7C9885", "#8E97FD", "#E58A5E", "#D98E96", "#5FA3A8" ][i % 5],
+        color: [ "#8B5CF6", "#22D3EE", "#EC4899", "#F59E0B", "#34D399" ][i % 5],
         rotate: Math.random() * 360,
         size: 6 + Math.random() * 6,
       })),
@@ -650,8 +654,6 @@ function HabitCard({ habit, onToggle, onUpdate, onDelete, viewDate, onMoveUp, on
   const [burst, setBurst] = useState(false);
   const checkDate = viewDate || dateKey();
   const done = habit.completedDates.includes(checkDate);
-  const currentStreak = useMemo(() => computeCurrentStreak(habit.completedDates), [habit.completedDates]);
-  const week = useMemo(() => last7Dates(), []);
 
   const handleToggle = () => {
     if (!done) {
@@ -707,15 +709,9 @@ function HabitCard({ habit, onToggle, onUpdate, onDelete, viewDate, onMoveUp, on
               {habit.name}
             </div>
             <div className="flex items-center gap-1 shrink-0">
-              {currentStreak > 0 && (
-                <span
-                  className="flex items-center gap-1 text-xs font-mono px-2 py-0.5 rounded-full"
-                  style={{
-                    background: currentStreak >= 7 ? "var(--accent)" : "var(--accent-soft)",
-                    color: currentStreak >= 7 ? "#fff" : "var(--accent)",
-                  }}
-                >
-                  <Flame size={11} /> {currentStreak}
+              {habit.bestStreak > 0 && (
+                <span className="flex items-center gap-1 text-xs font-mono px-2 py-0.5 rounded-full" style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>
+                  <Flame size={11} /> {habit.bestStreak}
                 </span>
               )}
               <button onClick={() => setOpen((o) => !o)} className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ color: "var(--muted)" }}>
@@ -723,34 +719,11 @@ function HabitCard({ habit, onToggle, onUpdate, onDelete, viewDate, onMoveUp, on
               </button>
             </div>
           </div>
-          <div className="text-[11px] mt-0.5" style={{ color: "var(--accent)" }}>
-            {streakMessage(currentStreak)}
-          </div>
           {habit.reminderTime && (
             <div className="flex items-center gap-1 text-xs mt-1" style={{ color: "var(--muted)" }}>
               <Clock size={11} /> {habit.reminderTime}
             </div>
           )}
-          <div className="flex items-center gap-1.5 mt-2">
-            {week.map((d) => {
-              const k = dateKey(d);
-              const isDone = habit.completedDates.includes(k);
-              const isToday = k === dateKey();
-              return (
-                <div
-                  key={k}
-                  title={d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
-                  className="w-4 h-4 rounded-full flex items-center justify-center"
-                  style={{
-                    background: isDone ? "var(--accent)" : "var(--track)",
-                    boxShadow: isToday ? "0 0 0 2px var(--accent-soft)" : "none",
-                  }}
-                >
-                  {isDone && <Check size={9} className="text-white" />}
-                </div>
-              );
-            })}
-          </div>
         </div>
       </div>
 
@@ -818,20 +791,6 @@ function HabitsView({ data, setData, toggleHabit }) {
     });
   };
 
-  const doneToday = data.habits.filter((h) => h.completedDates.includes(viewKey)).length;
-  const totalHabits = data.habits.length;
-  const dayPct = totalHabits ? Math.round((doneToday / totalHabits) * 100) : 0;
-  const dayLine =
-    totalHabits === 0
-      ? null
-      : dayPct === 100
-      ? "All done — you showed up for yourself today 🎉"
-      : dayPct >= 50
-      ? "Over halfway there, keep going 🔥"
-      : doneToday > 0
-      ? "Good start — momentum is building"
-      : "Nothing logged yet — even one small win counts";
-
   return (
     <div>
       <SectionTitle
@@ -844,18 +803,6 @@ function HabitsView({ data, setData, toggleHabit }) {
           </div>
         }
       />
-      {totalHabits > 0 && (
-        <Card className="p-4 mb-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-medium" style={{ color: "var(--text)" }}>
-              {doneToday}/{totalHabits} done {viewKey === dateKey() ? "today" : "that day"}
-            </span>
-            <span className="text-xs font-mono" style={{ color: "var(--accent)" }}>{dayPct}%</span>
-          </div>
-          <ProgressBar value={dayPct} color="var(--accent)" />
-          {dayLine && <div className="text-xs mt-2" style={{ color: "var(--muted)" }}>{dayLine}</div>}
-        </Card>
-      )}
       {viewKey !== dateKey() && (
         <div className="text-xs mb-4 px-1" style={{ color: "var(--muted)" }}>
           Editing {viewDate.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })} — tick anything you forgot to log that day.
@@ -1125,25 +1072,17 @@ function FocusView({ addFocusSession, accent }) {
 /* -------------------------------------------------------------------------- */
 /*                               READING TRACKER                              */
 /* -------------------------------------------------------------------------- */
-const FINISH_LINES = [
-  "Yaaay! Another book in the bag 🎉",
-  "You did it! What a finish 🥳",
-  "Book closed, mind opened 📖✨",
-  "That's a wrap! Onto the next one 🎊",
-];
-
-function ReadingView({ data, setData, celebrate }) {
+function ReadingView({ data, setData }) {
   const [modal, setModal] = useState(false);
   const [openBook, setOpenBook] = useState(null);
   const [form, setForm] = useState({ title: "", author: "", totalPages: 200 });
-  const [justFinished, setJustFinished] = useState(null);
-  const colors = ["#7C9885", "#8E97FD", "#E58A5E", "#D98E96", "#5FA3A8"];
+  const colors = ["#8B5CF6", "#22D3EE", "#EC4899", "#F59E0B", "#34D399"];
 
   const add = () => {
     if (!form.title.trim()) return;
     setData((d) => ({
       ...d,
-      books: [...d.books, { id: uid(), ...form, currentPage: 0, sessions: [], notes: "", quotes: [], completedAt: null }],
+      books: [...d.books, { id: uid(), ...form, currentPage: 0, sessions: [], notes: "", quotes: [], cover: null, completed: false }],
     }));
     setForm({ title: "", author: "", totalPages: 200 });
     setModal(false);
@@ -1153,125 +1092,94 @@ function ReadingView({ data, setData, celebrate }) {
 
   const logSession = (book, pages) => {
     if (!pages) return;
-    const wasFinished = book.totalPages > 0 && book.currentPage >= book.totalPages;
     const newPage = Math.min(book.totalPages, book.currentPage + Number(pages));
-    const justCompleted = !wasFinished && book.totalPages > 0 && newPage >= book.totalPages;
+    const patch = { currentPage: newPage, sessions: [...book.sessions, { date: dateKey(), pages: Number(pages) }] };
+    if (newPage >= book.totalPages) patch.completed = true;
+    update(book.id, patch);
+  };
 
-    setData((d) => ({
-      ...d,
-      books: d.books.map((b) =>
-        b.id === book.id
-          ? {
-              ...b,
-              currentPage: newPage,
-              sessions: [...b.sessions, { date: dateKey(), pages: Number(pages) }],
-              ...(justCompleted ? { completedAt: dateKey() } : {}),
-            }
-          : b
-      ),
-      xp: d.xp + (justCompleted ? 30 : 0),
-    }));
-
-    if (justCompleted) {
-      celebrate?.();
-      const line = FINISH_LINES[Math.floor(Math.random() * FINISH_LINES.length)];
-      setJustFinished({ title: book.title, line });
-      setTimeout(() => setJustFinished(null), 3400);
+  const uploadCover = async (book, file) => {
+    if (!file) return;
+    try {
+      const dataUrl = await fileToCompressedDataUrl(file);
+      update(book.id, { cover: dataUrl });
+    } catch {
+      /* silently ignore unreadable files */
     }
   };
 
   return (
     <div>
       <SectionTitle eyebrow="Books" title="Reading Tracker" action={<Button onClick={() => setModal(true)}><Plus size={16} /> Add book</Button>} />
-
-      <AnimatePresence>
-        {justFinished && (
-          <motion.div
-            initial={{ opacity: 0, y: -10, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -10, scale: 0.98 }}
-            className="mb-4 px-4 py-3 rounded-2xl flex items-center gap-3"
-            style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
-          >
-            <Trophy size={18} className="shrink-0" />
-            <div className="text-sm font-medium">
-              {justFinished.line} — <span className="font-serif">“{justFinished.title}”</span> is done. +30 XP
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {data.books.length === 0 ? (
         <EmptyState icon={BookOpen} title="Your shelf is empty" subtitle="Add a book you're reading to start tracking pages and quotes." />
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {data.books.map((b, i) => {
-            const finished = b.totalPages > 0 && b.currentPage >= b.totalPages;
-            const pct = finished ? 100 : Math.round((b.currentPage / (b.totalPages || 1)) * 100);
+            const pct = Math.round((b.currentPage / (b.totalPages || 1)) * 100);
             const isOpen = openBook === b.id;
+            const color = colors[i % colors.length];
             return (
-              <Card key={b.id} className="p-5 relative overflow-visible" style={finished ? { borderColor: "var(--accent)" } : undefined}>
-                {finished && (
-                  <div
-                    className="absolute -top-2.5 -right-2.5 w-7 h-7 rounded-full flex items-center justify-center shadow-sm"
-                    style={{ background: "var(--accent)", color: "#fff" }}
-                    title="Finished!"
-                  >
-                    <Check size={14} />
-                  </div>
-                )}
+              <Card key={b.id} className="p-5" style={b.completed ? { borderColor: color } : {}}>
                 <div className="flex gap-4">
-                  <div
-                    className="w-14 h-20 rounded-lg shrink-0 flex items-center justify-center text-white font-serif text-lg"
-                    style={{ background: colors[i % colors.length], opacity: finished ? 0.55 : 1 }}
-                  >
-                    {b.title.slice(0, 1).toUpperCase()}
-                  </div>
+                  <label className="relative w-14 h-20 rounded-lg shrink-0 flex items-center justify-center text-white font-serif text-lg overflow-hidden cursor-pointer group" style={{ background: color }}>
+                    {b.cover ? (
+                      <img src={b.cover} alt={b.title} className="w-full h-full object-cover" />
+                    ) : (
+                      b.title.slice(0, 1).toUpperCase()
+                    )}
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
+                      <Pencil size={13} className="text-white" />
+                    </div>
+                    <input type="file" accept="image/*" className="hidden" onChange={(e) => uploadCover(b, e.target.files?.[0])} />
+                    {b.completed && (
+                      <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center border-2" style={{ background: color, borderColor: "var(--card-solid)" }}>
+                        <Check size={11} className="text-white" />
+                      </div>
+                    )}
+                  </label>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5">
                       <div className="font-medium text-sm truncate" style={{ color: "var(--text)" }}>{b.title}</div>
-                      {finished && (
-                        <span className="text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0" style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>
-                          Finished
-                        </span>
-                      )}
                     </div>
                     <div className="text-xs mb-2" style={{ color: "var(--muted)" }}>{b.author || "Unknown author"}</div>
-                    <ProgressBar value={pct} color={colors[i % colors.length]} />
-                    <div className="text-[11px] mt-1" style={{ color: "var(--muted)" }}>
-                      {finished
-                        ? `Completed${b.completedAt ? ` on ${b.completedAt}` : ""} · ${b.totalPages} pages`
-                        : `${b.currentPage}/${b.totalPages} pages · ${pct}%`}
-                    </div>
+                    {b.completed ? (
+                      <div className="text-[11px] font-medium flex items-center gap-1" style={{ color }}>
+                        <Check size={12} /> Completed
+                      </div>
+                    ) : (
+                      <>
+                        <ProgressBar value={pct} color={color} />
+                        <div className="text-[11px] mt-1" style={{ color: "var(--muted)" }}>{b.currentPage}/{b.totalPages} pages · {pct}%</div>
+                      </>
+                    )}
                   </div>
                 </div>
-                {!finished && (
-                  <div className="flex items-center gap-2 mt-3">
-                    <Input
-                      type="number" placeholder="Pages read today" id={`pg-${b.id}`}
-                      className="text-xs"
-                      onKeyDown={(e) => { if (e.key === "Enter") { logSession(b, e.target.value); e.target.value = ""; } }}
-                    />
-                    <button
-                      onClick={() => { const el = document.getElementById(`pg-${b.id}`); logSession(b, el.value); el.value = ""; }}
-                      className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: "var(--accent)", color: "#fff" }}
-                    ><Plus size={15} /></button>
-                    <button onClick={() => setOpenBook(isOpen ? null : b.id)} className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ color: "var(--muted)" }}>
-                      <ChevronRight size={15} className={`transition-transform ${isOpen ? "rotate-90" : ""}`} />
-                    </button>
-                  </div>
-                )}
-                {finished && (
-                  <div className="mt-3">
-                    <button onClick={() => setOpenBook(isOpen ? null : b.id)} className="text-xs flex items-center gap-1" style={{ color: "var(--muted)" }}>
-                      Notes & quotes <ChevronRight size={13} className={`transition-transform ${isOpen ? "rotate-90" : ""}`} />
-                    </button>
-                  </div>
-                )}
+                <div className="flex items-center gap-2 mt-3">
+                  <Input
+                    type="number" placeholder="Pages read today" id={`pg-${b.id}`}
+                    className="text-xs"
+                    onKeyDown={(e) => { if (e.key === "Enter") { logSession(b, e.target.value); e.target.value = ""; } }}
+                  />
+                  <button
+                    onClick={() => { const el = document.getElementById(`pg-${b.id}`); logSession(b, el.value); el.value = ""; }}
+                    className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: "var(--accent)", color: "#fff" }}
+                  ><Plus size={15} /></button>
+                  <button onClick={() => setOpenBook(isOpen ? null : b.id)} className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ color: "var(--muted)" }}>
+                    <ChevronRight size={15} className={`transition-transform ${isOpen ? "rotate-90" : ""}`} />
+                  </button>
+                </div>
                 <AnimatePresence>
                   {isOpen && (
                     <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
                       <div className="pt-4 mt-4 border-t space-y-3" style={{ borderColor: "var(--border)" }}>
+                        <button
+                          onClick={() => update(b.id, { completed: !b.completed })}
+                          className="text-xs font-medium flex items-center gap-1.5 px-3 py-1.5 rounded-lg"
+                          style={{ background: b.completed ? "var(--track)" : "var(--accent-soft)", color: b.completed ? "var(--muted)" : "var(--accent)" }}
+                        >
+                          <Check size={13} /> {b.completed ? "Mark as still reading" : "Mark as completed"}
+                        </button>
                         <TextArea rows={2} placeholder="Notes…" value={b.notes} onChange={(e) => update(b.id, { notes: e.target.value })} />
                         <TextArea
                           rows={2} placeholder="Favorite quote…"
@@ -1280,7 +1188,7 @@ function ReadingView({ data, setData, celebrate }) {
                         {b.quotes.length > 0 && (
                           <div className="space-y-1">
                             {b.quotes.map((q, qi) => (
-                              <div key={qi} className="text-xs italic pl-3 border-l-2" style={{ color: "var(--muted)", borderColor: colors[i % colors.length] }}>"{q}"</div>
+                              <div key={qi} className="text-xs italic pl-3 border-l-2" style={{ color: "var(--muted)", borderColor: color }}>"{q}"</div>
                             ))}
                           </div>
                         )}
@@ -1334,7 +1242,7 @@ function EnglishView({ data, setData }) {
     { key: "reading", label: "Reading", icon: "📖", unit: "min" },
     { key: "vocab", label: "Vocabulary", icon: "🧠", unit: "words" },
   ];
-  const colors = { grammar: "#7C9885", listening: "#8E97FD", speaking: "#E58A5E", reading: "#D98E96", vocab: "#5FA3A8" };
+  const colors = { grammar: "#8B5CF6", listening: "#22D3EE", speaking: "#EC4899", reading: "#F59E0B", vocab: "#34D399" };
 
   return (
     <div>
@@ -1483,7 +1391,7 @@ function TrackersView({ data, setData }) {
   const [logAmount, setLogAmount] = useState("");
   const empty = { name: "", icon: "🎯", unit: "", target: 10 };
   const [form, setForm] = useState(empty);
-  const colors = ["#7C9885", "#8E97FD", "#E58A5E", "#D98E96", "#5FA3A8"];
+  const colors = ["#8B5CF6", "#22D3EE", "#EC4899", "#F59E0B", "#34D399"];
 
   const trackers = data.customTrackers || [];
 
@@ -1993,7 +1901,22 @@ function AuthScreen() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const themeVars = { "--bg": "#F6F7FB", "--card": "rgba(255,255,255,0.8)", "--card-solid": "#FFFFFF", "--text": "#232733", "--muted": "#6B7280", "--border": "rgba(35,39,51,0.08)", "--track": "rgba(35,39,51,0.06)", "--input": "rgba(35,39,51,0.03)", "--accent": "#7C9885", "--accent-soft": "#7C988522", "--danger": "#C7635C", "--danger-soft": "rgba(199,99,92,0.10)" };
+  const themeVars = {
+    "--bg": "#0B0B1E",
+    "--bg-image": "radial-gradient(ellipse 80% 60% at 15% 0%, rgba(139,92,246,0.28), transparent 60%), radial-gradient(ellipse 70% 60% at 100% 10%, rgba(34,211,238,0.18), transparent 60%), radial-gradient(ellipse 70% 60% at 50% 100%, rgba(236,72,153,0.16), transparent 60%), linear-gradient(180deg, #0B0B1E 0%, #131230 55%, #0B0B1E 100%)",
+    "--card": "rgba(255,255,255,0.07)",
+    "--card-solid": "#181733",
+    "--text": "#F3F1FF",
+    "--muted": "#A8A3C9",
+    "--border": "rgba(255,255,255,0.14)",
+    "--track": "rgba(255,255,255,0.07)",
+    "--input": "rgba(255,255,255,0.05)",
+    "--accent": "#8B5CF6",
+    "--accent-soft": "#8B5CF626",
+    "--danger": "#F87171",
+    "--danger-soft": "rgba(248,113,113,0.14)",
+    "--glass-shadow": "inset 0 1px 0 0 rgba(255,255,255,0.14), 0 8px 32px -8px rgba(0,0,0,0.5)",
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -2010,7 +1933,7 @@ function AuthScreen() {
   };
 
   return (
-    <div style={{ ...themeVars, background: "var(--bg)", minHeight: "100vh" }} className="flex items-center justify-center p-6">
+    <div style={{ ...themeVars, background: "var(--bg-image), var(--bg)", minHeight: "100vh" }} className="flex items-center justify-center p-6">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap');
         * { font-family: 'Inter', sans-serif; }
@@ -2085,8 +2008,8 @@ export default function App() {
 
   if (cloudConfigured && session === undefined) {
     return (
-      <div style={{ background: "#F6F7FB", minHeight: "100vh" }} className="flex items-center justify-center">
-        <LoaderCircle size={24} className="animate-spin" style={{ color: "#7C9885" }} />
+      <div style={{ background: "#0B0B1E", minHeight: "100vh" }} className="flex items-center justify-center">
+        <LoaderCircle size={24} className="animate-spin" style={{ color: "#8B5CF6" }} />
       </div>
     );
   }
@@ -2105,19 +2028,38 @@ function AppShell({ userId, userEmail }) {
   const [confetti, setConfetti] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
 
-  // Reusable celebration burst — fired for finishing all habits, finishing a
-  // book, hitting a streak milestone, etc.
-  const celebrate = useCallback(() => {
-    setConfetti(true);
-    setTimeout(() => setConfetti(false), 2400);
-  }, []);
-
   const isDark = data.theme === "dark";
   const themeVars = isDark
-    ? { "--bg": "#14171F", "--bg2": "#1B1F2A", "--card": "rgba(29,33,48,0.55)", "--card-solid": "#1D2130", "--text": "#E7E9F0", "--muted": "#9AA0AE", "--border": "rgba(231,233,240,0.09)", "--track": "rgba(231,233,240,0.08)", "--input": "rgba(255,255,255,0.04)", "--danger": "#E08585", "--danger-soft": "rgba(224,133,133,0.12)" }
-    : { "--bg": "#F6F7FB", "--bg2": "#FFFFFF", "--card": "rgba(255,255,255,0.72)", "--card-solid": "#FFFFFF", "--text": "#232733", "--muted": "#6B7280", "--border": "rgba(35,39,51,0.08)", "--track": "rgba(35,39,51,0.06)", "--input": "rgba(35,39,51,0.03)", "--danger": "#C7635C", "--danger-soft": "rgba(199,99,92,0.10)" };
+    ? {
+        "--bg": "#0B0B1E",
+        "--bg-image": "radial-gradient(ellipse 80% 60% at 15% 0%, rgba(139,92,246,0.20), transparent 60%), radial-gradient(ellipse 70% 60% at 100% 10%, rgba(34,211,238,0.14), transparent 60%), radial-gradient(ellipse 70% 60% at 50% 100%, rgba(236,72,153,0.12), transparent 60%), linear-gradient(180deg, #0B0B1E 0%, #131230 55%, #0B0B1E 100%)",
+        "--card": "rgba(255,255,255,0.06)",
+        "--card-solid": "#181733",
+        "--text": "#F3F1FF",
+        "--muted": "#A8A3C9",
+        "--border": "rgba(255,255,255,0.14)",
+        "--track": "rgba(255,255,255,0.07)",
+        "--input": "rgba(255,255,255,0.05)",
+        "--danger": "#F87171",
+        "--danger-soft": "rgba(248,113,113,0.14)",
+        "--glass-shadow": "inset 0 1px 0 0 rgba(255,255,255,0.14), 0 8px 32px -8px rgba(0,0,0,0.5)",
+      }
+    : {
+        "--bg": "#F1EEFC",
+        "--bg-image": "radial-gradient(ellipse 80% 60% at 15% 0%, rgba(139,92,246,0.14), transparent 60%), radial-gradient(ellipse 70% 60% at 100% 10%, rgba(34,211,238,0.12), transparent 60%), radial-gradient(ellipse 70% 60% at 50% 100%, rgba(236,72,153,0.10), transparent 60%), linear-gradient(180deg, #F5F2FD 0%, #EFEAFB 100%)",
+        "--card": "rgba(255,255,255,0.55)",
+        "--card-solid": "#FFFFFF",
+        "--text": "#241C3D",
+        "--muted": "#6E6690",
+        "--border": "rgba(36,28,61,0.12)",
+        "--track": "rgba(36,28,61,0.06)",
+        "--input": "rgba(36,28,61,0.04)",
+        "--danger": "#C7635C",
+        "--danger-soft": "rgba(199,99,92,0.10)",
+        "--glass-shadow": "inset 0 1px 0 0 rgba(255,255,255,0.6), 0 8px 28px -10px rgba(88,60,150,0.18)",
+      };
 
-  const accentSoft = `${data.accent}22`;
+  const accentSoft = `${data.accent}26`;
 
   /* -------- Habit toggle with streak & xp logic -------- */
   const toggleHabit = useCallback((id, targetDate) => {
@@ -2141,13 +2083,13 @@ function AppShell({ userId, userEmail }) {
       if (isToday) {
         const allDoneNow = habits.length > 0 && habits.every((h) => h.completedDates.includes(dayKey));
         if (allDoneNow) {
-          setTimeout(celebrate, 150);
+          setTimeout(() => { setConfetti(true); setTimeout(() => setConfetti(false), 2400); }, 150);
         }
       }
       const wasCompleting = !d.habits.find((h) => h.id === id).completedDates.includes(dayKey);
       return { ...d, habits, xp: d.xp + (wasCompleting ? 10 : -10) };
     });
-  }, [setData, celebrate]);
+  }, [setData]);
 
   const addFocusSession = useCallback((minutes) => {
     setData((d) => ({ ...d, focusSessions: [...d.focusSessions, { date: dateKey(), minutes }], xp: d.xp + 15 }));
@@ -2190,7 +2132,7 @@ function AppShell({ userId, userEmail }) {
     habits: <HabitsView data={data} setData={setData} toggleHabit={toggleHabit} />,
     tasks: <TasksView data={data} setData={setData} />,
     focus: <FocusView addFocusSession={addFocusSession} accent={data.accent} />,
-    reading: <ReadingView data={data} setData={setData} celebrate={celebrate} />,
+    reading: <ReadingView data={data} setData={setData} />,
     english: <EnglishView data={data} setData={setData} />,
     skills: <SkillsView data={data} setData={setData} />,
     trackers: <TrackersView data={data} setData={setData} />,
@@ -2205,7 +2147,10 @@ function AppShell({ userId, userEmail }) {
   const moreNav = visibleNav.slice(4);
 
   return (
-    <div style={{ ...themeVars, "--accent": data.accent, "--accent-soft": accentSoft, background: "var(--bg)", minHeight: "100vh" }} className="flex relative overflow-hidden">
+    <div
+      style={{ ...themeVars, "--accent": data.accent, "--accent-soft": accentSoft, background: "var(--bg-image), var(--bg)", minHeight: "100vh" }}
+      className="flex relative overflow-hidden"
+    >
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
         * { font-family: 'Inter', sans-serif; }
@@ -2216,19 +2161,25 @@ function AppShell({ userId, userEmail }) {
         @media (prefers-reduced-motion: reduce) { * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
       `}</style>
 
-      {/* ambient background — soft, slow-drifting glow, purely decorative */}
+      {/* ambient aurora glow — soft, slow-drifting color blooms behind the glass panels */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 0 }}>
         <motion.div
-          animate={{ x: [0, 40, 0], y: [0, 30, 0] }}
-          transition={{ duration: 26, repeat: Infinity, ease: "easeInOut" }}
-          className="absolute -top-24 -left-24 w-96 h-96 rounded-full blur-3xl"
-          style={{ background: "var(--accent)", opacity: 0.10 }}
+          animate={{ x: [0, 50, 0], y: [0, 35, 0] }}
+          transition={{ duration: 24, repeat: Infinity, ease: "easeInOut" }}
+          className="absolute -top-32 -left-32 w-[26rem] h-[26rem] rounded-full blur-3xl"
+          style={{ background: "#8B5CF6", opacity: isDark ? 0.35 : 0.22 }}
         />
         <motion.div
-          animate={{ x: [0, -30, 0], y: [0, 40, 0] }}
-          transition={{ duration: 32, repeat: Infinity, ease: "easeInOut" }}
-          className="absolute bottom-0 right-0 w-[28rem] h-[28rem] rounded-full blur-3xl"
-          style={{ background: "#8E97FD", opacity: 0.08 }}
+          animate={{ x: [0, -40, 0], y: [0, 45, 0] }}
+          transition={{ duration: 30, repeat: Infinity, ease: "easeInOut" }}
+          className="absolute top-1/3 -right-32 w-[30rem] h-[30rem] rounded-full blur-3xl"
+          style={{ background: "#22D3EE", opacity: isDark ? 0.28 : 0.18 }}
+        />
+        <motion.div
+          animate={{ x: [0, 30, 0], y: [0, -30, 0] }}
+          transition={{ duration: 34, repeat: Infinity, ease: "easeInOut" }}
+          className="absolute bottom-0 left-1/4 w-[26rem] h-[26rem] rounded-full blur-3xl"
+          style={{ background: "#EC4899", opacity: isDark ? 0.22 : 0.14 }}
         />
       </div>
 
